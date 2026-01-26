@@ -74,6 +74,15 @@ io.on('connection', (socket) => {
         io.to(data.target).emit('signal', { sender: socket.id, signal: data.signal });
     });
 
+    socket.on('mediaState', (data) => {
+        // data: { target: string, isMuted: boolean, isVideoOff: boolean }
+        io.to(data.target).emit('mediaState', {
+            sender: socket.id,
+            isMuted: data.isMuted,
+            isVideoOff: data.isVideoOff
+        });
+    });
+
     const cleanupPartner = () => {
         const partnerId = partners[socket.id];
         if (partnerId) {
