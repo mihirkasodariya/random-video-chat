@@ -407,28 +407,36 @@ const VideoChat = () => {
                     )}
                 </div>
 
-                {/* Remote Overlays: Unsafe or Partner Camera Off */}
-                {(isRemoteUnsafe || partnerVideoOff) && remoteStream && (
-                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm p-6 text-center animate-fade-in">
-                        {isRemoteUnsafe ? (
-                            <div className="p-6 bg-red-500/20 rounded-2xl border border-red-500/30 backdrop-blur-md">
-                                <h3 className="text-red-200 font-bold text-lg mb-1">Content Hidden</h3>
-                                <p className="text-white/60 text-xs">Safety policy violation detected</p>
+                {/* Remote Overlays: Partner Camera Off ONLY */}
+                {partnerVideoOff && remoteStream && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-zinc-900 animate-fade-in">
+                        <div className="w-32 h-32 rounded-full bg-zinc-800 flex items-center justify-center mb-4 ring-1 ring-white/5 shadow-2xl">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-16 h-16 text-zinc-500">
+                                <path fillRule="evenodd" d="M7.5 6a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM3.751 20.105a8.25 8.25 0 0116.498 0 .75.75 0 01-.437.695A18.683 18.683 0 0112 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 01-.437-.695z" clipRule="evenodd" />
+                            </svg>
+                        </div>
+                        <p className="text-zinc-500 text-sm font-medium">Partner’s camera is turned off</p>
+                    </div>
+                )}
+
+                {/* SAFETY ALERT BANNER (Top Center - Visible to Both) */}
+                {(isLocalUnsafe || isRemoteUnsafe) && (
+                    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-4 animate-slide-in-top">
+                        <div className="bg-red-600/90 backdrop-blur-md text-white px-6 py-4 rounded-xl shadow-2xl border border-red-500/50 flex flex-col items-center text-center gap-2">
+                            <div className="flex items-center gap-2 text-lg font-bold">
+                                <span className="text-2xl animate-pulse">⚠️</span>
+                                <span>Sexual Activity Detected</span>
                             </div>
-                        ) : (
-                            <div className="flex flex-col items-center gap-4">
-                                <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-md">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-white/50">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                                    </svg>
-                                </div>
-                                <div className="space-y-2">
-                                    <h3 className="text-white font-semibold text-xl tracking-wide">Partner’s camera is off</h3>
-                                    <p className="text-white/50 text-sm">Video hidden for privacy</p>
-                                    <p className="text-white/30 text-xs mt-2 font-light">Content hidden for safety</p>
-                                </div>
-                            </div>
-                        )}
+                            {isLocalUnsafe ? (
+                                <p className="text-sm font-medium text-red-100">
+                                    Your camera feed is currently visible to your connected partner.
+                                </p>
+                            ) : (
+                                <p className="text-sm font-medium text-red-100">
+                                    Sexual activity detected in partner's video.
+                                </p>
+                            )}
+                        </div>
                     </div>
                 )}
 
@@ -458,20 +466,16 @@ const VideoChat = () => {
                         />
                     </div>
 
-                    {/* Local Overlays: Unsafe or Camera Off */}
-                    {(isVideoOff || isLocalUnsafe) && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center bg-black/40 backdrop-blur-[2px]">
-                            {isVideoOff ? (
-                                <>
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-white/70 mb-1">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l1.664 1.664M21 21l-1.5-1.5m-5.485-2.158A6 6 0 002 9h-.008v.008H2.022a16.99 16.99 0 001.763 8.818M15 14.25v2.25a2.25 2.25 0 01-2.25 2.25H4.5a2.25 2.25 0 01-2.25-2.25v-4.5a2.25 2.25 0 012.25-2.25h.75m6 0h.75M16.5 12a4.5 4.5 0 00-6.364-6.364M9.75 9.75l1.5 1.5" />
-                                    </svg>
-                                    <p className="text-[10px] font-bold text-white leading-tight">Camera is turned off</p>
-                                    <p className="text-[8px] text-white/60 leading-tight mt-0.5">Not visible to partner</p>
-                                </>
-                            ) : (
-                                <p className="text-[10px] text-red-300 font-bold">Unsafe Content</p>
-                            )}
+                    {/* Local Overlays: Camera Off ONLY */}
+                    {isVideoOff && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center bg-zinc-900 z-10">
+                            <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mb-2 ring-1 ring-white/5">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-zinc-500">
+                                    <path d="M12 9a3.75 3.75 0 100 7.5A3.75 3.75 0 0012 9z" />
+                                    <path fillRule="evenodd" d="M9.344 3.071a49.52 49.52 0 015.312 0c.967.052 1.83.585 2.332 1.39l.821 1.317c.24.383.645.643 1.11.71.386.054.77.113 1.152.177 1.432.239 2.429 1.493 2.429 2.909V18a3 3 0 01-3 3h-15a3 3 0 01-3-3V9.574c0-1.416.997-2.67 2.429-2.909.382-.064.766-.123 1.151-.178a1.56 1.56 0 001.11-.71l.822-1.315a2.942 2.942 0 012.332-1.39zM6.75 12.75a5.25 5.25 0 1110.5 0 5.25 5.25 0 01-10.5 0zm12-1.5a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
+                                </svg>
+                            </div>
+                            <p className="text-[10px] text-zinc-500 font-medium">Your camera is turned off</p>
                         </div>
                     )}
 
