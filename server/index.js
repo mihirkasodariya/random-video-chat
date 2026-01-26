@@ -19,7 +19,7 @@ const io = new Server(server, {
 });
 
 
-let waitingUser = null;
+let queue = [];
 const partners = {}; // Map<SocketID, SocketID> to track active pairs
 
 io.on('connection', (socket) => {
@@ -32,77 +32,72 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // If there is a waiting user and it's not the same user
-        if (waitingUser && waitingUser.id !== socket.id) {
-            // Monitor if the waiting user is still connected
-            if (waitingUser.connected) {
-                console.log(`Matching ${socket.id} with ${waitingUser.id}`);
+        // Clean queue of self or stale IDs
+        queue = queue.filter(id => id !== socket.id && io.sockets.sockets.has(id));
 
-                // Notify both users
-                const roomId = waitingUser.id + '#' + socket.id;
+        if (queue.length > 0) {
+            const partnerId = queue.shift();
+            const partnerSocket = io.sockets.sockets.get(partnerId);
+
+            if (partnerSocket && partnerSocket.connected) {
+                console.log(`Matching ${socket.id} with ${partnerId}`);
+
+                const roomId = `${partnerId}#${socket.id}`;
                 socket.join(roomId);
-                waitingUser.join(roomId);
+                partnerSocket.join(roomId);
 
-                // Track partners
-                partners[socket.id] = waitingUser.id;
-                partners[waitingUser.id] = socket.id;
+                partners[socket.id] = partnerId;
+                partners[partnerId] = socket.id;
 
-                // Tell waiting user to send offer (they are the initiator)
-                io.to(waitingUser.id).emit('match', { initiator: true, roomId, partnerId: socket.id });
-                // Tell current user to wait for offer
-                io.to(socket.id).emit('match', { initiator: false, roomId, partnerId: waitingUser.id });
-
-                waitingUser = null; // Queue is empty
+                // Initiator is the one who was in the queue
+                io.to(partnerId).emit('match', { initiator: true, roomId, partnerId: socket.id });
+                io.to(socket.id).emit('match', { initiator: false, roomId, partnerId: partnerId });
             } else {
-                // Waiting user disconnected, this user becomes the waiting user
-                waitingUser = socket;
-                console.log(`User ${socket.id} added to queue (previous waiter missing)`);
+                queue.push(socket.id);
             }
         } else {
-            // No one waiting, add this user to queue
-            if (waitingUser && waitingUser.id === socket.id) {
-                // Already waiting, do nothing
-            } else {
-                waitingUser = socket;
-                console.log(`User ${socket.id} added to queue`);
-            }
+            queue.push(socket.id);
+            console.log(`User ${socket.id} added to queue. Current queue:`, queue);
         }
     });
 
     socket.on('signal', (data) => {
-        // data: { target: string, signal: any }
-        io.to(data.target).emit('signal', { sender: socket.id, signal: data.signal });
+        if (data.target) {
+            io.to(data.target).emit('signal', { sender: socket.id, signal: data.signal });
+        }
     });
 
     socket.on('mediaState', (data) => {
-        // data: { target: string, isMuted: boolean, isVideoOff: boolean }
-        io.to(data.target).emit('mediaState', {
-            sender: socket.id,
-            isMuted: data.isMuted,
-            isVideoOff: data.isVideoOff
-        });
+        if (data.target) {
+            io.to(data.target).emit('mediaState', {
+                sender: socket.id,
+                isMuted: data.isMuted,
+                isVideoOff: data.isVideoOff
+            });
+        }
+    });
+
+    socket.on('chatMessage', (data) => {
+        if (data.target) {
+            io.to(data.target).emit('chatMessage', { sender: socket.id, message: data.message });
+        }
     });
 
     const cleanupPartner = () => {
         const partnerId = partners[socket.id];
         if (partnerId) {
-            // Notify partner
             io.to(partnerId).emit('partnerDisconnected');
-            // Cleanup
             delete partners[partnerId];
             delete partners[socket.id];
         }
+        queue = queue.filter(id => id !== socket.id);
     }
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
-        if (waitingUser && waitingUser.id === socket.id) {
-            waitingUser = null;
-        }
         cleanupPartner();
     });
 
-    // Custom 'next' event to explicitly leave and re-queue
     socket.on('next', () => {
         cleanupPartner();
     });

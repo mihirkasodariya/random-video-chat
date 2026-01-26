@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 import { useNavigate } from 'react-router-dom';
 import { loadModel, checkImage, isUnsafe } from '../utils/safety';
+
 import MatchGate from './MatchGate';
+import Chat from './Chat';
 
 const ICE_SERVERS = {
     iceServers: [
@@ -46,6 +48,14 @@ const VideoChat = () => {
     const socketRef = useRef();
     const partnerIdRef = useRef();
     const hasJoinedRef = useRef(false);
+    const candidatesQueue = useRef([]);
+    const signalsQueue = useRef([]);
+
+    // Chat state
+    const [messages, setMessages] = useState([]);
+    const [isChatEnabled, setIsChatEnabled] = useState(false);
+    const [chatClearTrigger, setChatClearTrigger] = useState(0);
+    const [showChat, setShowChat] = useState(false); // New state for mobile toggle
 
     useEffect(() => {
         setupCamera();
@@ -59,10 +69,7 @@ const VideoChat = () => {
         setSocket(newSocket);
         socketRef.current = newSocket;
 
-        // Auto-join on mount/load is handled by effect depending on stream & socket below
-
         return () => {
-            // Cleanup handled in handleEndCall or page unload usually, but good to be safe
             if (stream) stream.getTracks().forEach(track => track.stop());
             newSocket.disconnect();
         };
@@ -87,7 +94,6 @@ const VideoChat = () => {
             setStream(newStream);
             setFacingMode(mode);
 
-            // Respect current mute/video off states
             newStream.getAudioTracks().forEach(track => track.enabled = !isMuted);
             newStream.getVideoTracks().forEach(track => track.enabled = !isVideoOff);
 
@@ -95,7 +101,6 @@ const VideoChat = () => {
                 localVideoRef.current.srcObject = newStream;
             }
 
-            // If connected, replace track (advanced)
             if (peerRef.current) {
                 const senders = peerRef.current.getSenders();
                 const videoTrack = newStream.getVideoTracks()[0];
@@ -113,20 +118,60 @@ const VideoChat = () => {
         }
     };
 
-    // Ensure video element gets stream if ref updates or stream updates later
     useEffect(() => {
         if (localVideoRef.current && stream) {
-            localVideoRef.current.srcObject = stream;
+            // Only set if different to avoid refreshing the video stream
+            if (localVideoRef.current.srcObject !== stream) {
+                localVideoRef.current.srcObject = stream;
+            }
         }
-    }, [stream]);
+    }, [stream, isVideoOff, isLocalUnsafe]);
 
-    // Same for remote
     useEffect(() => {
         if (remoteVideoRef.current && remoteStream) {
-            remoteVideoRef.current.srcObject = remoteStream;
+            if (remoteVideoRef.current.srcObject !== remoteStream) {
+                remoteVideoRef.current.srcObject = remoteStream;
+            }
         }
-    }, [remoteStream]);
+    }, [remoteStream, partnerVideoOff, isRemoteUnsafe]);
+    const handleSignal = async (sender, signal) => {
+        if (!peerRef.current) {
+            signalsQueue.current.push({ sender, signal });
+            return;
+        }
 
+        try {
+            if (signal.type === 'offer') {
+                await peerRef.current.setRemoteDescription(new RTCSessionDescription(signal));
+                const answer = await peerRef.current.createAnswer();
+                await peerRef.current.setLocalDescription(answer);
+                socketRef.current.emit('signal', { target: sender, signal: answer });
+
+                // Process queued candidates
+                while (candidatesQueue.current.length > 0) {
+                    const cand = candidatesQueue.current.shift();
+                    try { await peerRef.current.addIceCandidate(cand); } catch (e) { }
+                }
+            } else if (signal.type === 'answer') {
+                await peerRef.current.setRemoteDescription(new RTCSessionDescription(signal));
+
+                // Process queued candidates
+                while (candidatesQueue.current.length > 0) {
+                    const cand = candidatesQueue.current.shift();
+                    try { await peerRef.current.addIceCandidate(cand); } catch (e) { }
+                }
+            } else if (signal.candidate) {
+                const candidate = new RTCIceCandidate(signal.candidate);
+                if (peerRef.current.remoteDescription && peerRef.current.remoteDescription.type) {
+                    try { await peerRef.current.addIceCandidate(candidate); } catch (e) { }
+                } else {
+                    candidatesQueue.current.push(candidate);
+                }
+            }
+        } catch (err) {
+            console.error("Signaling error:", err);
+        }
+    };
 
     useEffect(() => {
         if (!socket) return;
@@ -135,13 +180,27 @@ const VideoChat = () => {
             console.log("Matched with", partnerId, "Initiator:", initiator);
             setStatus('matched');
             partnerIdRef.current = partnerId;
+            candidatesQueue.current = []; // Clear queue on match
+            signalsQueue.current = []; // Clear early signals
+            setMessages([]); // Clear chat state
             initializePeer(initiator, partnerId);
 
-            // Reset partner state on new match
+            // Process any signals that arrived early
+            while (signalsQueue.current.length > 0) {
+                const { sender, signal } = signalsQueue.current.shift();
+                handleSignal(sender, signal);
+            }
+
             setPartnerMuted(false);
             setPartnerVideoOff(false);
 
-            // Send my current state to new partner
+            setIsChatEnabled(true);
+            setChatClearTrigger(prev => prev + 1);
+
+            if (window.innerWidth < 768) {
+                setShowChat(false);
+            }
+
             socket.emit('mediaState', {
                 target: partnerId,
                 isMuted,
@@ -150,18 +209,7 @@ const VideoChat = () => {
         });
 
         socket.on('signal', async ({ sender, signal }) => {
-            if (peerRef.current) {
-                if (signal.type === 'offer') {
-                    await peerRef.current.setRemoteDescription(new RTCSessionDescription(signal));
-                    const answer = await peerRef.current.createAnswer();
-                    await peerRef.current.setLocalDescription(answer);
-                    socket.emit('signal', { target: sender, signal: answer });
-                } else if (signal.type === 'answer') {
-                    await peerRef.current.setRemoteDescription(new RTCSessionDescription(signal));
-                } else if (signal.candidate) {
-                    await peerRef.current.addIceCandidate(new RTCIceCandidate(signal.candidate));
-                }
-            }
+            handleSignal(sender, signal);
         });
 
         socket.on('mediaState', ({ sender, isMuted: remoteMuted, isVideoOff: remoteVideoOff }) => {
@@ -173,9 +221,11 @@ const VideoChat = () => {
 
         socket.on('partnerDisconnected', () => {
             console.log("Partner disconnected, searching for next...");
-            // Automatically try next unless we are blocked
             if (!showGate && !isAdPlaying) {
                 handleNext();
+            } else {
+                setIsChatEnabled(false);
+                setChatClearTrigger(prev => prev + 1);
             }
         });
 
@@ -185,7 +235,7 @@ const VideoChat = () => {
             socket.off('mediaState');
             socket.off('partnerDisconnected');
         };
-    }, [socket, stream, showGate, isAdPlaying, isMuted, isVideoOff]); // Added deps to prevent auto-next when blocked
+    }, [socket, stream, showGate, isAdPlaying, isMuted, isVideoOff]);
 
     const initializePeer = (initiator, partnerId) => {
         const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -227,11 +277,9 @@ const VideoChat = () => {
     const handleNext = () => {
         if (showGate || isAdPlaying) return;
 
-        // Increment count
         const newCount = nextClickCount + 1;
         setNextClickCount(newCount);
 
-        // Disconnect current
         if (peerRef.current) {
             peerRef.current.close();
             peerRef.current = null;
@@ -240,17 +288,19 @@ const VideoChat = () => {
         setIsRemoteUnsafe(false);
         setPartnerMuted(false);
         setPartnerVideoOff(false);
+        setIsChatEnabled(false);
+        setChatClearTrigger(prev => prev + 1);
+        setShowChat(false); // Close chat on next
+
         socketRef.current.emit('next');
 
-        // Check if we reached the limit (5 clicks => 6th action is block)
         if (newCount > 5) {
             setShowGate(true);
             setStatus('idle');
-            hasJoinedRef.current = false; // Reset so we don't auto-join
+            hasJoinedRef.current = false;
             return;
         }
 
-        // Reset join flag and re-join
         hasJoinedRef.current = false;
         joinQueue();
     };
@@ -258,23 +308,18 @@ const VideoChat = () => {
     const handleClaim = () => {
         setShowGate(false);
         setIsAdPlaying(true);
-
-        // Simulate Ad
         setTimeout(() => {
             setIsAdPlaying(false);
-            setNextClickCount(0); // Reset count
-            joinQueue(); // Auto connect
+            setNextClickCount(0);
+            joinQueue();
         }, 3000);
     };
 
     const handleGateClose = () => {
         setShowGate(false);
-        // Do not reset count, do not join queue. User is stuck until they claim.
-        // Actually, if they close, they might be "idle". Next button will likely just open gate again since count > 5.
     };
 
     const handleEndCall = () => {
-        // Cleanup and navigate home
         if (peerRef.current) peerRef.current.close();
         if (stream) stream.getTracks().forEach(track => track.stop());
         if (socketRef.current) socketRef.current.disconnect();
@@ -289,7 +334,6 @@ const VideoChat = () => {
     };
 
     useEffect(() => {
-        // Only auto-join if we are NOT blocked
         if (stream && socket && !showGate && !isAdPlaying && nextClickCount <= 5) {
             joinQueue();
         }
@@ -300,28 +344,21 @@ const VideoChat = () => {
         const interval = setInterval(async () => {
             if (localVideoRef.current && stream && !isVideoOff) {
                 const predictions = await checkImage(localVideoRef.current);
-                if (isUnsafe(predictions)) setIsLocalUnsafe(true);
-                else setIsLocalUnsafe(false);
+                setIsLocalUnsafe(isUnsafe(predictions));
             }
-
             if (remoteVideoRef.current && remoteStream && !partnerVideoOff) {
                 const predictions = await checkImage(remoteVideoRef.current);
-                if (isUnsafe(predictions)) setIsRemoteUnsafe(true);
-                else setIsRemoteUnsafe(false);
+                setIsRemoteUnsafe(isUnsafe(predictions));
             }
-        }, 1000); // Check every second
-
+        }, 1000);
         return () => clearInterval(interval);
     }, [stream, remoteStream, isVideoOff, partnerVideoOff]);
 
-    // Toggle Functions
     const toggleAudio = () => {
         if (stream) {
             const newMutedState = !isMuted;
             setIsMuted(newMutedState);
             stream.getAudioTracks().forEach(track => track.enabled = !newMutedState);
-
-            // Sync
             if (partnerIdRef.current) {
                 socketRef.current.emit('mediaState', {
                     target: partnerIdRef.current,
@@ -337,8 +374,6 @@ const VideoChat = () => {
             const newVideoState = !isVideoOff;
             setIsVideoOff(newVideoState);
             stream.getVideoTracks().forEach(track => track.enabled = !newVideoState);
-
-            // Sync
             if (partnerIdRef.current) {
                 socketRef.current.emit('mediaState', {
                     target: partnerIdRef.current,
@@ -349,222 +384,170 @@ const VideoChat = () => {
         }
     };
 
-    const [isFlipping, setIsFlipping] = useState(false);
-
-    const switchCamera = async () => {
-        setIsFlipping(true);
-        // Small delay to allow flip animation to start before stream cuts
-        await new Promise(r => setTimeout(r, 300));
-
-        const newMode = facingMode === 'user' ? 'environment' : 'user';
-        await setupCamera(newMode);
-
-        setIsFlipping(false);
+    const toggleChat = () => {
+        setShowChat(!showChat);
     };
 
+    const [isFlipping, setIsFlipping] = useState(false);
+
     return (
-        <div className="flex flex-col h-full w-full max-w-6xl mx-auto md:px-4 gap-4 relative">
+        <div className="flex flex-col h-screen w-full bg-white overflow-hidden text-gray-900 font-sans">
             <MatchGate isOpen={showGate} onClose={handleGateClose} onClaim={handleClaim} />
 
-            {/* Ad Overlay */}
-            {isAdPlaying && (
-                <div className="fixed inset-0 z-[60] bg-black flex flex-col items-center justify-center text-white">
-                    <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <p className="text-xl font-bold">Watching Ad...</p>
-                    <p className="text-sm text-gray-400">Please wait to verify your account</p>
-                </div>
-            )}
 
-            {error && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-500/90 text-white px-6 py-3 rounded-full shadow-xl backdrop-blur-md flex items-center gap-3 animate-fade-in border border-white/10">
-                    <span className="text-xl">⚠️</span>
-                    <p className="text-sm font-medium">{error}</p>
-                </div>
-            )}
+            {/* Main Content Area */}
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-white">
 
-            {/* Main Video Area */}
-            <div className="flex-1 relative rounded-3xl overflow-hidden bg-black shadow-2xl ring-1 ring-white/10 group/container">
+                {/* Video Area (Stacked on Mobile, Side-by-Side on Desktop) */}
+                <div className="flex-1 flex flex-col md:flex-row h-full min-h-0 bg-black relative">
 
-                {/* Remote Video (Full Size) */}
-                <div className={`absolute inset-0 w-full h-full ${isRemoteUnsafe || partnerVideoOff ? 'blur-3xl scale-110 opacity-50' : ''} transition-all duration-500`}>
-                    {remoteStream ? (
-                        <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                    ) : (
-                        <div className="flex flex-col items-center justify-center w-full h-full bg-dark-800 text-white/30 gap-6">
-                            <div className="relative">
-                                <div className="w-24 h-24 rounded-full border-4 border-white/5 animate-[spin_8s_linear_infinite] border-t-primary-500/50"></div>
-                                <div className="absolute inset-0 flex items-center justify-center text-4xl animate-bounce-slow">
-                                    {status === 'waiting' ? '👀' : '👋'}
-                                </div>
-                            </div>
-                            <div className="text-center space-y-2">
-                                <p className="text-xl font-medium text-white/80 tracking-wide">
-                                    {status === 'waiting' ? 'Searching for partner...' : 'Connecting...'}
-                                </p>
-                                <p className="text-sm text-white/40"> Be kind & respectful </p>
-                            </div>
+                    {/* Desktop Floating Controls Overlay */}
+                    <div className="hidden md:flex absolute bottom-8 left-1/2 -translate-x-1/2 z-30 items-center gap-4 px-6 py-3 bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl">
+                        {/* Stop Button */}
+                        <button
+                            onClick={handleEndCall}
+                            className="px-6 py-2.5 bg-slate-900/80 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-lg uppercase tracking-widest transition-all active:scale-95 border border-white/5"
+                        >
+                            Stop (ESC)
+                        </button>
+
+                        {/* Media Icons */}
+                        <div className="flex gap-3 px-4 border-l border-r border-white/10">
+                            <button onClick={toggleAudio} className={`p-2.5 rounded-full transition-all ${isMuted ? 'bg-red-500/80 text-white shadow-lg' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                                {isMuted ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                                )}
+                            </button>
+                            <button onClick={toggleVideo} className={`p-2.5 rounded-full transition-all ${isVideoOff ? 'bg-red-500/80 text-white shadow-lg' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                                {isVideoOff ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                                )}
+                            </button>
                         </div>
-                    )}
-                </div>
 
-                {/* Remote Overlays: Partner Camera Off ONLY */}
-                {partnerVideoOff && remoteStream && (
-                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-zinc-900 animate-fade-in">
-                        <div className="w-32 h-32 rounded-full bg-zinc-800 flex items-center justify-center mb-4 ring-1 ring-white/5 shadow-2xl">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-16 h-16 text-zinc-500">
-                                <path fillRule="evenodd" d="M7.5 6a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM3.751 20.105a8.25 8.25 0 0116.498 0 .75.75 0 01-.437.695A18.683 18.683 0 0112 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 01-.437-.695z" clipRule="evenodd" />
-                            </svg>
-                        </div>
-                        <p className="text-zinc-500 text-sm font-medium">Partner’s camera is turned off</p>
+                        {/* Next Button */}
+                        <button
+                            onClick={handleNext}
+                            className="px-8 py-2.5 bg-blue-600/80 hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 uppercase tracking-widest transition-all active:scale-95 border border-white/5"
+                        >
+                            Next (▶)
+                        </button>
                     </div>
-                )}
 
-                {/* SAFETY ALERT BANNER (Top Center - Visible to Both) */}
-                {(isLocalUnsafe || isRemoteUnsafe) && (
-                    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-4 animate-slide-in-top">
-                        <div className="bg-red-600/90 backdrop-blur-md text-white px-6 py-4 rounded-xl shadow-2xl border border-red-500/50 flex flex-col items-center text-center gap-2">
-                            <div className="flex items-center gap-2 text-lg font-bold">
-                                <span className="text-2xl animate-pulse">⚠️</span>
-                                <span>Sexual Activity Detected</span>
+                    {/* Stranger Video */}
+                    <div className="flex-1 relative overflow-hidden flex items-center justify-center border-b border-gray-800 md:border-b-0 md:border-r md:border-gray-400">
+                        {remoteStream && !partnerVideoOff ? (
+                            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                        ) : (
+                            <div className="text-center text-gray-400 bg-gray-900 w-full h-full flex flex-col items-center justify-center">
+                                <div className="text-6xl mb-2 opacity-30">?</div>
+                                <p className="font-bold text-sm">Stranger</p>
                             </div>
-                            {isLocalUnsafe ? (
-                                <p className="text-sm font-medium text-red-100">
-                                    Your camera feed is currently visible to your connected partner.
-                                </p>
-                            ) : (
-                                <p className="text-sm font-medium text-red-100">
-                                    Sexual activity detected in partner's video.
-                                </p>
-                            )}
+                        )}
+
+                        {/* Mobile Overlays (matching image) */}
+                        <div className="md:hidden absolute top-4 right-4 bg-gray-500/50 p-2.5 rounded-lg backdrop-blur-sm z-20 border border-white/10 shadow-lg">
+                            <div className="w-5 h-5 flex items-center justify-center bg-white text-gray-800 rounded-sm font-black text-xs">!</div>
                         </div>
+
                     </div>
-                )}
 
-                {/* Partner Muted Indicator */}
-                {partnerMuted && remoteStream && !partnerVideoOff && (
-                    <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 bg-black/60 backdrop-blur-md rounded-full border border-white/10 z-20 animate-fade-in">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-red-400">
-                            <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 001.5 12c0 .898.121 1.768.35 2.595.341 1.24 1.518 1.905 2.659 1.905h1.93l4.5 4.5c.945.945 2.561.276 2.561-1.06V4.06zM18.584 5.106a.75.75 0 011.06 0c3.808 3.807 3.808 9.98 0 13.788a.75.75 0 01-1.06-1.06 8.25 8.25 0 000-11.668.75.75 0 010-1.06z" />
-                            <path d="M15.932 7.757a.75.75 0 011.061 0 6 6 0 010 8.486.75.75 0 01-1.06-1.061 4.5 4.5 0 000-6.364.75.75 0 010-1.06z" />
-                        </svg>
-                        <span className="text-sm font-medium text-white/90">Partner is muted</span>
-                    </div>
-                )}
-
-
-                {/* Local Video (PIP) - Mirrored */}
-                <div className={`absolute top-4 right-4 w-32 md:w-48 aspect-[3/4] md:aspect-video rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/20 transition-all duration-500 z-20 bg-black ${isLocalUnsafe ? 'ring-red-500' : ''} ${isFlipping ? '[transform:rotateY(180deg)] opacity-50' : 'hover:scale-105'}`}>
-
-                    {/* Video with Blur if Off/Unsafe */}
-                    <div className={`absolute inset-0 ${isVideoOff || isLocalUnsafe ? 'blur-md bg-white/5' : ''}`}>
+                    {/* Local Video (You) */}
+                    <div className="flex-1 relative overflow-hidden flex items-center justify-center bg-gray-900 border-l border-white/5">
                         <video
                             ref={localVideoRef}
                             autoPlay
                             playsInline
                             muted
-                            className={`w-full h-full object-cover transition-transform duration-300 ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+                            className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+                        />
+
+                        {(isVideoOff || isLocalUnsafe) && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950/80 z-20 backdrop-blur-sm">
+                                <div className="text-4xl mb-2 opacity-30 text-white font-bold uppercase tracking-widest">You</div>
+                                <div className="px-4 py-1.5 bg-red-600/20 border border-red-500/50 rounded-full">
+                                    <p className="text-[10px] text-red-400 font-bold uppercase tracking-widest text-center">
+                                        {isLocalUnsafe ? 'Safety Filter Active' : 'Camera Off'}
+                                    </p>
+                                </div>
+                            </div>
+                        )}                        {/* Mobile Floating Media Controls */}
+                        <div className="md:hidden absolute top-1/2 -translate-y-1/2 right-4 z-30 flex flex-col gap-4">
+                            <button onClick={toggleAudio} className={`p-4 rounded-2xl backdrop-blur-xl border border-white/10 transition-all ${isMuted ? 'bg-red-500/80 text-white' : 'bg-black/30 text-white'}`}>
+                                {isMuted ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                                )}
+                            </button>
+                            <button onClick={toggleVideo} className={`p-4 rounded-2xl backdrop-blur-xl border border-white/10 transition-all ${isVideoOff ? 'bg-red-500/80 text-white' : 'bg-black/30 text-white'}`}>
+                                {isVideoOff ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                                )}
+                            </button>
+                        </div>
+
+                        {/* Mobile Message Overlay (Matching Image Style) */}
+                        <div className="md:hidden absolute bottom-2 left-2 right-2 flex flex-col gap-1.5 z-40">
+                            {/* Show only last 3 messages as floating banners */}
+                            {messages.slice(-3).map((msg, idx) => (
+                                <div key={idx} className="bg-gray-800/60 backdrop-blur-md p-2.5 rounded-lg text-white text-[12px] leading-snug border border-white/5 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                    <span className={`font-black uppercase tracking-tighter mr-2 ${msg.isOwn ? 'text-blue-400' : 'text-red-400'}`}>
+                                        {msg.isOwn ? 'You: ' : 'Stranger: '}
+                                    </span>
+                                    <span>{msg.text}</span>
+                                </div>
+                            ))}
+
+                            {/* Only show the info banner if no messages yet to save space */}
+                            {messages.length === 0 && (
+                                <div className="bg-gray-600/70 backdrop-blur-md p-3 rounded-xl text-white text-[11px] leading-snug border border-white/10 shadow-lg">
+                                    Meet a person — عباس from Iraq. Engage in a respectful and friendly chat! 🌐📸
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="md:hidden absolute top-4 left-4 text-white text-[9px] font-bold uppercase tracking-widest drop-shadow-md z-20 opacity-80">You</div>
+                    </div>
+                </div>
+
+
+                {/* Right/Bottom Segment: Chat- focused Panel */}
+                <div className="bg-white md:w-[350px] lg:w-[450px] border-t md:border-t-0 md:border-l border-gray-200 flex flex-col shrink-0 md:flex-none">
+
+                    {/* Integrated Chat Component - Handles all logic and messages */}
+                    <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+                        <Chat
+                            socket={socket}
+                            isChatEnabled={isChatEnabled}
+                            clearChatTrigger={chatClearTrigger}
+                            partnerId={partnerIdRef.current}
+                            messages={messages}
+                            setMessages={setMessages}
                         />
                     </div>
 
-                    {/* Local Overlays: Camera Off ONLY */}
-                    {isVideoOff && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center bg-zinc-900 z-10">
-                            <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mb-2 ring-1 ring-white/5">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-zinc-500">
-                                    <path d="M12 9a3.75 3.75 0 100 7.5A3.75 3.75 0 0012 9z" />
-                                    <path fillRule="evenodd" d="M9.344 3.071a49.52 49.52 0 015.312 0c.967.052 1.83.585 2.332 1.39l.821 1.317c.24.383.645.643 1.11.71.386.054.77.113 1.152.177 1.432.239 2.429 1.493 2.429 2.909V18a3 3 0 01-3 3h-15a3 3 0 01-3-3V9.574c0-1.416.997-2.67 2.429-2.909.382-.064.766-.123 1.151-.178a1.56 1.56 0 001.11-.71l.822-1.315a2.942 2.942 0 012.332-1.39zM6.75 12.75a5.25 5.25 0 1110.5 0 5.25 5.25 0 01-10.5 0zm12-1.5a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
-                                </svg>
-                            </div>
-                            <p className="text-[10px] text-zinc-500 font-medium">Your camera is turned off</p>
-                        </div>
-                    )}
-
-                    {/* Identification Badge */}
-                    <div className="absolute bottom-2 left-2 flex items-center gap-1.5 px-2 py-1 bg-black/60 backdrop-blur-md rounded-md border border-white/5">
-                        <div className={`w-1.5 h-1.5 rounded-full ${isLocalUnsafe ? 'bg-red-500' : 'bg-green-500'} animate-pulse`}></div>
-                        <span className="text-[10px] font-medium text-white/90">You</span>
+                    {/* Mobile Only: Action Buttons (Next/Stop) - Positioned 10px below Chat Input */}
+                    <div className="md:hidden flex px-4 pb-8 pt-[10px] bg-white gap-4">
+                        <button
+                            onClick={handleEndCall}
+                            className="flex-1 py-4 bg-slate-900 text-white font-bold text-xs rounded-2xl shadow-xl shadow-slate-900/20 uppercase tracking-[0.1em] active:scale-95 transition-all"
+                        >
+                            STOP (ESC)
+                        </button>
+                        <button
+                            onClick={handleNext}
+                            className="flex-1 py-4 bg-blue-600 text-white font-bold text-xs rounded-2xl shadow-xl shadow-blue-600/20 uppercase tracking-[0.1em] active:scale-95 transition-all"
+                        >
+                            NEXT (▶)
+                        </button>
                     </div>
-
-                    {/* Muted Icon (Local) */}
-                    {isMuted && !isVideoOff && (
-                        <div className="absolute top-2 right-2 p-1 bg-red-500/80 rounded-full">
-                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
-                            </svg>
-                        </div>
-                    )}
-                </div>
-
-                {/* Main Controls - Floating Bar */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 p-2 rounded-full bg-dark-900/80 backdrop-blur-2xl border border-white/10 shadow-2xl z-30 transition-transform duration-300 hover:scale-105 hover:bg-dark-900/90">
-
-                    {/* End Call Button */}
-                    <button
-                        onClick={handleEndCall}
-                        disabled={isAdPlaying || showGate}
-                        className="w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 bg-red-600/90 text-white hover:bg-red-500 shadow-lg shadow-red-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="End Call & Exit"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-
-                    <div className="w-[1px] h-8 bg-white/10 mx-1"></div>
-
-
-                    {/* Audio Toggle */}
-                    <button
-                        onClick={toggleAudio}
-                        disabled={isAdPlaying || showGate}
-                        className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 ${isMuted ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 ring-2 ring-red-500/50' : 'bg-dark-800 text-white hover:bg-dark-700 ring-1 ring-white/10'} disabled:opacity-50 disabled:cursor-not-allowed`}
-                        title={isMuted ? "Unmute" : "Mute"}
-                    >
-                        {isMuted ? (
-                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
-                            </svg>
-                        ) : (
-                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                            </svg>
-                        )}
-                    </button>
-
-                    {/* Video Toggle */}
-                    <button
-                        onClick={toggleVideo}
-                        disabled={isAdPlaying || showGate}
-                        className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 ${isVideoOff ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 ring-2 ring-red-500/50' : 'bg-dark-800 text-white hover:bg-dark-700 ring-1 ring-white/10'} disabled:opacity-50 disabled:cursor-not-allowed`}
-                        title={isVideoOff ? "Start Video" : "Stop Video"}
-                    >
-                        {isVideoOff ? (
-                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
-                            </svg>
-                        ) : (
-                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                        )}
-                    </button>
-
-                    <div className="w-[1px] h-8 bg-white/10 mx-1"></div>
-
-                    {/* Next Button */}
-                    <button
-                        onClick={handleNext}
-                        disabled={isAdPlaying}
-                        className="h-12 px-8 rounded-full bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white font-bold flex items-center gap-2 shadow-lg shadow-primary-600/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <span>Next</span>
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                        </svg>
-                    </button>
                 </div>
             </div>
         </div>
