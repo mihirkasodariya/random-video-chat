@@ -12,12 +12,22 @@
 }
 
 @layer base {
+
+  html,
   body {
-    @apply bg-white text-gray-900 font-sans antialiased min-h-screen m-0;
+    @apply h-full w-full m-0 p-0 overflow-hidden;
+    height: 100dvh;
+    touch-action: manipulation;
+  }
+
+  body {
+    @apply bg-white text-gray-900 font-sans antialiased;
+    position: fixed;
+    width: 100%;
   }
 
   #root {
-    @apply w-full min-h-screen flex flex-col;
+    @apply w-full h-full flex flex-col overflow-hidden;
   }
 }
 

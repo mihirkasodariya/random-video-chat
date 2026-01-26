@@ -9,7 +9,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/random-connect" element={
-          <div className="w-full h-screen bg-neutral-900 text-white">
+          <div className="w-full h-dvh bg-neutral-900 text-white overflow-hidden">
             <VideoChat />
           </div>
         } />

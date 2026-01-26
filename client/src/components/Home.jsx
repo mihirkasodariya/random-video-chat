@@ -5,7 +5,7 @@ const Home = () => {
     const navigate = useNavigate();
 
     return (
-        <div className="min-h-screen bg-slate-900 text-white font-sans selection:bg-blue-500/30">
+        <div className="h-full overflow-y-auto bg-slate-900 text-white font-sans selection:bg-blue-500/30">
             {/* Header */}
             <header className="px-6 py-4 flex items-center justify-between border-b border-white/5 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
                 <div className="flex items-center gap-3">

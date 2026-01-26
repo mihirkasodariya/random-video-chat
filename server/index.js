@@ -20,7 +20,7 @@ const io = new Server(server, {
 
 
 let queue = [];
-const partners = {}; // Map<SocketID, SocketID> to track active pairs
+const partners = {}; // Map<SocketID, { partnerId: SocketID, roomId: String }> to track active pairs
 
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
@@ -46,8 +46,8 @@ io.on('connection', (socket) => {
                 socket.join(roomId);
                 partnerSocket.join(roomId);
 
-                partners[socket.id] = partnerId;
-                partners[partnerId] = socket.id;
+                partners[socket.id] = { partnerId, roomId };
+                partners[partnerId] = { partnerId: socket.id, roomId };
 
                 // Initiator is the one who was in the queue
                 io.to(partnerId).emit('match', { initiator: true, roomId, partnerId: socket.id });
@@ -78,15 +78,28 @@ io.on('connection', (socket) => {
     });
 
     socket.on('chatMessage', (data) => {
-        if (data.target) {
-            io.to(data.target).emit('chatMessage', { sender: socket.id, message: data.message });
+        const myId = socket.id;
+        const partnerInfo = partners[myId];
+
+        if (partnerInfo && partnerInfo.partnerId) {
+            const targetId = partnerInfo.partnerId;
+            console.log(`[CHAT] ${myId} -> ${targetId}: "${data.message}"`);
+
+            // Direct relay to target socket
+            io.to(targetId).emit('chatMessage', {
+                sender: myId,
+                message: data.message
+            });
+        } else {
+            console.warn(`[CHAT] Drop msg from ${myId}. No partner found in map.`);
         }
     });
 
     const cleanupPartner = () => {
-        const partnerId = partners[socket.id];
-        if (partnerId) {
-            io.to(partnerId).emit('partnerDisconnected');
+        const partnerInfo = partners[socket.id];
+        if (partnerInfo) {
+            const { partnerId, roomId } = partnerInfo;
+            io.to(roomId).emit('partnerDisconnected');
             delete partners[partnerId];
             delete partners[socket.id];
         }
