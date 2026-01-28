@@ -18,7 +18,7 @@ const MatchGate = ({ isOpen, onClose, onClaim }) => {
             ></div>
 
             {/* Modal Content */}
-            <div className="relative bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-fade-in text-center p-6">
+            <div className="relative bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-[scale-in_0.3s_ease-out_forwards] text-center p-6">
 
                 {/* Close Button */}
                 <button

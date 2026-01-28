@@ -5,6 +5,7 @@ import { loadModel, checkImage, isUnsafe } from '../utils/safety';
 
 import MatchGate from './MatchGate';
 import Chat from './Chat';
+import BannerAd from './BannerAd';
 
 const ICE_SERVERS = {
     iceServers: [
@@ -66,7 +67,7 @@ const VideoChat = () => {
             if (loaded) console.log("NSFW Model loaded");
         });
 
-        const newSocket = io('https://random-video-chat-node.onrender.com');
+        const newSocket = io();
         setSocket(newSocket);
         socketRef.current = newSocket;
 
@@ -218,7 +219,7 @@ const VideoChat = () => {
             setMatchedPartnerId(null);
             setMessages([]);
             if (!showGate && !isAdPlaying) {
-                handleNext();
+                performNext();
             } else {
                 setIsChatEnabled(false);
                 setChatClearTrigger(prev => prev + 1);
@@ -285,12 +286,7 @@ const VideoChat = () => {
         }
     };
 
-    const handleNext = () => {
-        if (showGate || isAdPlaying) return;
-
-        const newCount = nextClickCount + 1;
-        setNextClickCount(newCount);
-
+    const performNext = () => {
         if (peerRef.current) {
             peerRef.current.close();
             peerRef.current = null;
@@ -308,25 +304,46 @@ const VideoChat = () => {
 
         socketRef.current.emit('next');
 
-        if (newCount > 5) {
-            setShowGate(true);
-            setStatus('idle');
-            hasJoinedRef.current = false;
-            return;
-        }
-
         hasJoinedRef.current = false;
         joinQueue();
     };
 
+    const handleNext = () => {
+        if (showGate || isAdPlaying) return;
+
+        const potentialNextCount = nextClickCount + 1;
+
+        // Check if we hit the limit (Every 6th click)
+        // This allows 5 free skips (1,2,3,4,5). The 6th attempt triggers the gate.
+        if (potentialNextCount > 0 && potentialNextCount % 6 === 0) {
+            setShowGate(true);
+            return;
+        }
+
+        setNextClickCount(potentialNextCount);
+        performNext();
+    };
+
+    const [adTimer, setAdTimer] = useState(6);
+
     const handleClaim = () => {
+        console.log("Loading AdMob Rewarded Ad: ca-app-pub-3940256099942544/5224354917");
         setShowGate(false);
         setIsAdPlaying(true);
-        setTimeout(() => {
-            setIsAdPlaying(false);
-            setNextClickCount(0);
-            joinQueue();
-        }, 3000);
+        setAdTimer(6);
+
+        const timerInterval = setInterval(() => {
+            setAdTimer((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timerInterval);
+                    setIsAdPlaying(false);
+                    setNextClickCount(prevCount => prevCount + 1); // Pass the gate
+                    performNext(); // Immediate connection
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
     };
 
     const handleGateClose = () => {
@@ -348,7 +365,7 @@ const VideoChat = () => {
     };
 
     useEffect(() => {
-        if (stream && socket && !showGate && !isAdPlaying && nextClickCount <= 5) {
+        if (stream && socket && !showGate && !isAdPlaying) {
             joinQueue();
         }
     }, [stream, socket]);
@@ -399,6 +416,15 @@ const VideoChat = () => {
         }
     };
 
+    const adVideoRef = useRef(null);
+
+    useEffect(() => {
+        if (isAdPlaying && adVideoRef.current) {
+            adVideoRef.current.currentTime = 0;
+            adVideoRef.current.play().catch(err => console.log("Ad play error:", err));
+        }
+    }, [isAdPlaying]);
+
     const handleRemoveMessage = (index) => {
         setMessages(prev => prev.filter((_, i) => i !== index));
     };
@@ -406,6 +432,40 @@ const VideoChat = () => {
     return (
         <div className="flex flex-col h-dvh w-full bg-black md:bg-white overflow-hidden text-gray-900 font-sans">
             <MatchGate isOpen={showGate} onClose={handleGateClose} onClaim={handleClaim} />
+
+            {/* Ad Overlay - Preloaded (Rendered but hidden when Gate is open) */}
+            {(showGate || isAdPlaying) && (
+                <div className={`absolute inset-0 flex flex-col items-center justify-center text-white transition-all duration-300 bg-black ${isAdPlaying ? 'z-[60] opacity-100 pointer-events-auto' : 'z-0 opacity-0 pointer-events-none'}`}>
+                    {/* AdSense Live Unit Container - Fixed Standard Size 300x250 */}
+                    <div className="relative w-[300px] h-[250px] flex items-center justify-center bg-gray-900 rounded-lg overflow-hidden border border-white/10 shadow-2xl">
+                        {/* Loading/bg layer */}
+                        <div className="absolute inset-0 flex items-center justify-center text-white/30 text-xs font-mono z-0">
+                            Loading Ad...
+                        </div>
+
+                        {/* The Real AdSense Component */}
+                        <div className="relative z-10 w-full h-full flex items-center justify-center">
+                            {/* 
+                                   IMPORTANT: 
+                                   To show REAL ADS here:
+                                   1. Replace 'clientId' with your 'ca-pub-...' ID.
+                                   2. Replace 'slotId' with your actual Ad Unit ID.
+                                   3. Ensure your domain is approved by AdSense.
+                                */}
+                            <GoogleAd
+                                clientId="ca-pub-3940256099942544"
+                                slotId="5224354917"
+                                style={{ width: '300px', height: '250px' }}
+                                format="rectangle"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="absolute top-4 right-4 z-20 bg-yellow-500 text-black px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all">
+                        Reward Granting in {adTimer}s...
+                    </div>
+                </div>
+            )}
 
             {/* Main Content Area */}
             <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-black md:bg-white relative">
@@ -490,7 +550,7 @@ const VideoChat = () => {
                             autoPlay
                             playsInline
                             muted
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-cover scale-x-[-1]"
                         />
                         {(isVideoOff || isLocalUnsafe) && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950/80 z-20 backdrop-blur-sm">
@@ -581,6 +641,7 @@ const VideoChat = () => {
                             setMessages={setMessages}
                         />
                     </div>
+                    {/* <BannerAd /> */}
                 </div>
             </div>
         </div>
