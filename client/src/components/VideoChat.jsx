@@ -68,7 +68,7 @@ const VideoChat = () => {
             if (loaded) console.log("NSFW Model loaded");
         });
 
-        const newSocket = io();
+        const newSocket = io("https://random-video-chat-node.onrender.com");
         setSocket(newSocket);
         socketRef.current = newSocket;
 
