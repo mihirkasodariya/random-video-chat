@@ -5,6 +5,15 @@ import GoogleAd from './GoogleAd';
 const Home = () => {
     const navigate = useNavigate();
 
+    const handleStartChat = () => {
+        const isVerified = localStorage.getItem("ageVerified");
+        if (isVerified === "true") {
+            navigate('/random-connect');
+        } else {
+            navigate('/age-verification');
+        }
+    };
+
     return (
         <div className="h-dvh w-full overflow-y-auto bg-slate-900 text-white font-sans selection:bg-blue-500/30">
             {/* Header */}
@@ -39,7 +48,7 @@ const Home = () => {
                             <p className="text-slate-400 mb-8 max-w-lg mx-auto">Click the button below to connect with a random stranger instantly</p>
 
                             <button
-                                onClick={() => navigate('/random-connect')}
+                                onClick={handleStartChat}
                                 className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-md transition-all duration-200 flex items-center gap-2 mx-auto active:scale-95 shadow-lg shadow-blue-600/20"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">

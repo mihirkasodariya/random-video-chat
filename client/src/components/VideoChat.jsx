@@ -6,6 +6,7 @@ import { loadModel, checkImage, isUnsafe } from '../utils/safety';
 import MatchGate from './MatchGate';
 import Chat from './Chat';
 import BannerAd from './BannerAd';
+import GoogleAd from './GoogleAd';
 
 const ICE_SERVERS = {
     iceServers: [
@@ -431,6 +432,8 @@ const VideoChat = () => {
 
     return (
         <div className="flex flex-col h-dvh w-full bg-black md:bg-white overflow-hidden text-gray-900 font-sans">
+
+
             <MatchGate isOpen={showGate} onClose={handleGateClose} onClaim={handleClaim} />
 
             {/* Ad Overlay - Preloaded (Rendered but hidden when Gate is open) */}
