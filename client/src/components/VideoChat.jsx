@@ -74,7 +74,8 @@ const VideoChat = () => {
             if (loaded) console.log("NSFW Model loaded");
         });
 
-        const newSocket = io(window.location.origin);
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+        const newSocket = io(backendUrl);
         setSocket(newSocket);
         socketRef.current = newSocket;
 
