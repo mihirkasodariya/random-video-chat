@@ -1,4 +1,3 @@
-import React from 'react';
 
 const MatchGate = ({ isOpen, onClose, onClaim }) => {
     if (!isOpen) return null;
@@ -13,12 +12,12 @@ const MatchGate = ({ isOpen, onClose, onClaim }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+                className="absolute inset-0 bg-black/60 backdrop-blur-md transition-opacity"
                 onClick={onClose}
             ></div>
 
             {/* Modal Content */}
-            <div className="relative bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-[scale-in_0.3s_ease-out_forwards] text-center p-6">
+            <div className="relative bg-slate-800 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-[scale-in_0.3s_ease-out_forwards] text-center p-6">
 
                 {/* Close Button */}
                 <button
@@ -31,7 +30,7 @@ const MatchGate = ({ isOpen, onClose, onClaim }) => {
                 </button>
 
                 {/* Header */}
-                <h2 className="text-xl font-bold text-slate-900 mb-6">Free Match</h2>
+                <h2 className="text-xl font-bold text-white mb-6">Free Match</h2>
 
                 {/* Avatars */}
                 <div className="flex justify-center -space-x-4 mb-6">
@@ -43,14 +42,21 @@ const MatchGate = ({ isOpen, onClose, onClaim }) => {
                 </div>
 
                 {/* Message */}
-                <p className="text-slate-600 mb-8 font-medium px-4">
+                <p className="text-white mb-8 font-medium px-4">
                     Unlock <span className="text-amber-500 font-bold">ALL GIRLS</span> Match Filter Privilege!
                 </p>
 
                 {/* CTA */}
-                <button
+                {/* <button
                     onClick={onClaim}
                     className="w-full bg-cyan-400 hover:bg-cyan-500 text-white font-bold py-3.5 rounded-full shadow-lg shadow-cyan-400/30 transition-all active:scale-95 text-lg"
+                >
+                    Claim
+                </button> */}
+
+                <button
+                    onClick={onClaim}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 px-3 rounded-xl transition-all duration-300 flex items-center justify-center gap-3 active:scale-95 shadow-lg shadow-blue-600/20 text-xl"
                 >
                     Claim
                 </button>

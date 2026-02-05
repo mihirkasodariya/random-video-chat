@@ -5,16 +5,129 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>client</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Mrgana Video Call</title>
+
+  <!-- Google Ad Manager (GPT) -->
+  <script async src="https://securepubads.g.doubleclick.net/tag/js/gpt.js" crossorigin="anonymous"></script>
+  <script>
+    window.googletag = window.googletag || { cmd: [] };
+    window.rewardedAdState = { ready: false, event: null, slot: null, loading: false };
+
+    googletag.cmd.push(function () {
+      googletag.enableServices();
+
+      const AD_UNIT = '/22639388115/rewarded_web_example';
+      const slot = googletag.defineOutOfPageSlot(AD_UNIT, googletag.enums.OutOfPageFormat.REWARDED)
+        .addService(googletag.pubads());
+      window.rewardedAdState.slot = slot;
+
+      googletag.pubads().addEventListener("rewardedSlotReady", (evt) => {
+        if (evt.slot === slot) {
+          console.log("[Global Ad] Reward Ready!");
+          window.rewardedAdState.ready = true;
+          window.rewardedAdState.loading = false;
+          window.rewardedAdState.event = evt;
+          if (window.onRewardedReady) {
+            const callback = window.onRewardedReady;
+            window.onRewardedReady = null;
+            callback();
+          }
+        }
+      });
+
+      googletag.pubads().addEventListener("rewardedSlotGranted", (evt) => {
+        if (evt.slot === slot) {
+          console.log("[Global Ad] Reward Granted!");
+          if (window.onRewardGranted) window.onRewardGranted();
+          window.rewardedAdState.ready = false;
+          window.rewardedAdState.event = null;
+          googletag.pubads().refresh([slot]);
+        }
+      });
+
+      googletag.pubads().addEventListener("rewardedSlotClosed", (evt) => {
+        if (evt.slot === slot) {
+          console.log("[Global Ad] Ad Closed.");
+          if (window.onRewardClosed) window.onRewardClosed();
+          window.rewardedAdState.ready = false;
+          window.rewardedAdState.event = null;
+          googletag.pubads().refresh([slot]);
+        }
+      });
+
+      googletag.pubads().addEventListener("slotRenderEnded", (evt) => {
+        if (evt.slot === slot && evt.isEmpty) {
+          console.log("[Global Ad] No Fill - Slot is empty.");
+          window.rewardedAdState.loading = false;
+          if (window.onRewardedReady) {
+            const callback = window.onRewardedReady;
+            window.onRewardedReady = null;
+            callback();
+          }
+        }
+      });
+
+      googletag.display(slot);
+    });
+
+    window.showRewardedAd = function (onGranted, onClosed, onLoading) {
+      if (window.rewardedAdState.ready && window.rewardedAdState.event) {
+        window.onRewardGranted = onGranted;
+        window.onRewardClosed = onClosed;
+        window.rewardedAdState.event.makeRewardedVisible();
+        return true;
+      } else {
+        console.log("[Global Ad] Not ready, trying for 5 seconds...");
+        window.onRewardGranted = onGranted;
+        window.onRewardClosed = onClosed;
+
+        // Auto-Skip Timeout (5 seconds) - If ad fails, give them the reward anyway
+        const timeout = setTimeout(() => {
+          if (window.onRewardedReady) {
+            console.log("[Global Ad] Ad took too long. Auto-skipping to reward.");
+            window.onRewardedReady = null;
+            if (onLoading) onLoading(false);
+            onGranted(); // Give reward even if ad fails to load
+          }
+        }, 5000);
+
+        window.onRewardedReady = () => {
+          clearTimeout(timeout);
+          if (onLoading) onLoading(false);
+          if (window.rewardedAdState.ready && window.rewardedAdState.event) {
+            window.rewardedAdState.event.makeRewardedVisible();
+          } else {
+            console.log("[Global Ad] No fill or Slot ended. Auto-rewarding.");
+            onGranted();
+          }
+        };
+
+        if (!window.rewardedAdState.loading) {
+          window.rewardedAdState.loading = true;
+          googletag.pubads().refresh([window.rewardedAdState.slot]);
+        }
+        return false;
+      }
+    };
+  </script>
 </head>
 
 <body>
   <div id="root"></div>
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3940256099942544"
-    crossorigin="anonymous">
-    </script>
-
   <script type="module" src="/src/main.jsx"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then((reg) => {
+          console.log('SW Registered', reg);
+        }).catch((err) => {
+          console.log('SW Fail', err);
+        });
+      });
+    }
+  </script>
 </body>
 
 </html>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const Chat = ({ socket, isChatEnabled, clearChatTrigger, partnerId, messages, setMessages, hideHistory = false }) => {
     const [newMessage, setNewMessage] = useState('');
@@ -52,8 +52,8 @@ const Chat = ({ socket, isChatEnabled, clearChatTrigger, partnerId, messages, se
                                     {messages.map((msg, idx) => (
                                         <div key={idx} className={`flex flex-col ${msg.isOwn ? 'items-start' : 'items-start'}`}>
                                             <div className="flex items-baseline gap-2">
-                                                <span className={`text-[13px] font-black uppercase tracking-tighter ${msg.isOwn ? 'text-blue-600' : 'text-red-600'}`}>
-                                                    {msg.isOwn ? 'You' : 'Stranger'}
+                                                <span className={`text-[13px] pl-2 font-black uppercase tracking-tighter ${msg.isOwn ? 'text-blue-600' : 'text-red-600'}`}>
+                                                    {msg.isOwn ? 'You : ' : 'Stranger : '}
                                                 </span>
                                                 <span className="text-[15px] leading-relaxed text-gray-800 font-medium">
                                                     {msg.text}
@@ -87,7 +87,7 @@ const Chat = ({ socket, isChatEnabled, clearChatTrigger, partnerId, messages, se
                         disabled={!isChatEnabled || !newMessage.trim()}
                         className="ml-2 flex items-center justify-center p-1.5 md:p-2 bg-blue-600 md:bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all active:scale-90 disabled:opacity-40 disabled:grayscale"
                     >
-                        <svg className="w-5 h-5 md:w-5 md:h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <svg className="w-4 h-4 md:w-5 md:h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
                             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                         </svg>

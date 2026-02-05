@@ -1,8 +1,9 @@
 const express = require('express');
-const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
@@ -10,7 +11,13 @@ app.use(cors());
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
-const server = http.createServer(app);
+// Read SSL certificate and key
+const options = {
+    key: fs.readFileSync(path.join(__dirname, 'key.pem')),
+    cert: fs.readFileSync(path.join(__dirname, 'cert.pem'))
+};
+
+const server = https.createServer(options, app);
 const io = new Server(server, {
     cors: {
         origin: "*", // Allow all origins for dev, restrict in prod
@@ -129,6 +136,8 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`\x1b[32m%s\x1b[0m`, `Backend (HTTPS) for Signal Server running on:`);
+    console.log(`  > Local:    https://localhost:${PORT}`);
+    console.log(`\x1b[33m%s\x1b[0m`, `Note: Since this uses a self-signed cert, you may need to visit the link above once and 'Proceed to localhost (unsafe)' in your browser.`);
 });

@@ -1,12 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 import { useNavigate } from 'react-router-dom';
 import { loadModel, checkImage, isUnsafe } from '../utils/safety';
 
 import MatchGate from './MatchGate';
 import Chat from './Chat';
-import BannerAd from './BannerAd';
-import GoogleAd from './GoogleAd';
+import SafetyPolicy from './SafetyPolicy';
+import InterstitialAd from './InterstitialAd';
 
 const ICE_SERVERS = {
     iceServers: [
@@ -41,6 +41,9 @@ const VideoChat = () => {
     const [nextClickCount, setNextClickCount] = useState(0);
     const [showGate, setShowGate] = useState(false);
     const [isAdPlaying, setIsAdPlaying] = useState(false);
+    const [isLoadingAd, setIsLoadingAd] = useState(false);
+    const [showStopAd, setShowStopAd] = useState(false);
+    const [stopClickCount, setStopClickCount] = useState(0);
 
     const [error, setError] = useState(null);
     const [facingMode, setFacingMode] = useState('user'); // 'user' or 'environment'
@@ -59,8 +62,11 @@ const VideoChat = () => {
     const [isChatEnabled, setIsChatEnabled] = useState(false);
     const [chatClearTrigger, setChatClearTrigger] = useState(0);
     const [showChat, setShowChat] = useState(false); // New state for mobile toggle
+    const [showPolicy, setShowPolicy] = useState(true); // Mandatory per-entry popup
 
     useEffect(() => {
+        if (showPolicy) return; // Wait for agreement before starting
+
         setupCamera();
 
         // Load Safety Model
@@ -68,7 +74,7 @@ const VideoChat = () => {
             if (loaded) console.log("NSFW Model loaded");
         });
 
-        const newSocket = io("https://random-video-chat-node.onrender.com");
+        const newSocket = io(window.location.origin);
         setSocket(newSocket);
         socketRef.current = newSocket;
 
@@ -76,7 +82,7 @@ const VideoChat = () => {
             if (stream) stream.getTracks().forEach(track => track.stop());
             newSocket.disconnect();
         };
-    }, []);
+    }, [showPolicy]);
 
     const setupCamera = async (mode = 'user') => {
         try {
@@ -315,8 +321,19 @@ const VideoChat = () => {
         const potentialNextCount = nextClickCount + 1;
 
         // Check if we hit the limit (Every 6th click)
-        // This allows 5 free skips (1,2,3,4,5). The 6th attempt triggers the gate.
-        if (potentialNextCount > 0 && potentialNextCount % 6 === 0) {
+        if (potentialNextCount > 0 && potentialNextCount % 3 === 0) {
+            // Clear current partner
+            if (peerRef.current) {
+                peerRef.current.close();
+                peerRef.current = null;
+            }
+            setRemoteStream(null);
+            setMatchedPartnerId(null);
+            setIsChatEnabled(false);
+
+            // Set status to waiting so user sees "Looking for partner..." behind the popup
+            setStatus('waiting');
+
             setShowGate(true);
             return;
         }
@@ -325,26 +342,40 @@ const VideoChat = () => {
         performNext();
     };
 
-    const [adTimer, setAdTimer] = useState(6);
-
     const handleClaim = () => {
-        console.log("Loading AdMob Rewarded Ad: ca-app-pub-3940256099942544/5224354917");
         setShowGate(false);
         setIsAdPlaying(true);
-        setAdTimer(6);
+        setIsLoadingAd(true);
 
-        const timerInterval = setInterval(() => {
-            setAdTimer((prev) => {
-                if (prev <= 1) {
-                    clearInterval(timerInterval);
-                    setIsAdPlaying(false);
-                    setNextClickCount(prevCount => prevCount + 1); // Pass the gate
-                    performNext(); // Immediate connection
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
+        const onGranted = () => {
+            setNextClickCount(prev => prev + 1);
+            setTimeout(() => {
+                setIsAdPlaying(false);
+                performNext();
+            }, 2000);
+        };
+
+        const onClosed = () => {
+            setIsAdPlaying(false);
+            setIsLoadingAd(false);
+        };
+
+        const onLoadingDone = () => {
+            setIsLoadingAd(false);
+        };
+
+        if (!window.showRewardedAd) {
+            console.warn("Rewarded ads blocked or not loaded.");
+            setIsLoadingAd(false);
+            setIsAdPlaying(false);
+            performNext();
+            return;
+        }
+
+        const isInstant = window.showRewardedAd(onGranted, onClosed, onLoadingDone);
+        if (isInstant) {
+            setIsLoadingAd(false);
+        }
     };
 
     const handleGateClose = () => {
@@ -352,9 +383,17 @@ const VideoChat = () => {
     };
 
     const handleEndCall = () => {
+        // Show the Stop Button Ad and increment count for a fresh ad
+        setStopClickCount(prev => prev + 1);
+        setShowStopAd(true);
+        // Clean up connections immediately so resources are freed in background
         if (peerRef.current) peerRef.current.close();
         if (stream) stream.getTracks().forEach(track => track.stop());
         if (socketRef.current) socketRef.current.disconnect();
+    };
+
+    const handleStopAdComplete = () => {
+        setShowStopAd(false);
         navigate('/');
     };
 
@@ -369,7 +408,7 @@ const VideoChat = () => {
         if (stream && socket && !showGate && !isAdPlaying) {
             joinQueue();
         }
-    }, [stream, socket]);
+    }, [stream, socket, showGate, isAdPlaying]);
 
     // Safety Check Loop
     useEffect(() => {
@@ -436,36 +475,24 @@ const VideoChat = () => {
 
             <MatchGate isOpen={showGate} onClose={handleGateClose} onClaim={handleClaim} />
 
-            {/* Ad Overlay - Preloaded (Rendered but hidden when Gate is open) */}
-            {(showGate || isAdPlaying) && (
-                <div className={`absolute inset-0 flex flex-col items-center justify-center text-white transition-all duration-300 bg-black ${isAdPlaying ? 'z-[60] opacity-100 pointer-events-auto' : 'z-0 opacity-0 pointer-events-none'}`}>
-                    {/* AdSense Live Unit Container - Fixed Standard Size 300x250 */}
-                    <div className="relative w-[300px] h-[250px] flex items-center justify-center bg-gray-900 rounded-lg overflow-hidden border border-white/10 shadow-2xl">
-                        {/* Loading/bg layer */}
-                        <div className="absolute inset-0 flex items-center justify-center text-white/30 text-xs font-mono z-0">
-                            Loading Ad...
-                        </div>
-
-                        {/* The Real AdSense Component */}
-                        <div className="relative z-10 w-full h-full flex items-center justify-center">
-                            {/* 
-                                   IMPORTANT: 
-                                   To show REAL ADS here:
-                                   1. Replace 'clientId' with your 'ca-pub-...' ID.
-                                   2. Replace 'slotId' with your actual Ad Unit ID.
-                                   3. Ensure your domain is approved by AdSense.
-                                */}
-                            <GoogleAd
-                                clientId="ca-pub-3940256099942544"
-                                slotId="5224354917"
-                                style={{ width: '300px', height: '250px' }}
-                                format="rectangle"
-                            />
-                        </div>
+            {/* Ad Loading Overlay - Professional Look */}
+            {isLoadingAd && (
+                <div className="absolute inset-0 z-[200] flex flex-col items-center justify-center bg-[#0a0a0f] text-white animate-in fade-in duration-500">
+                    <div className="relative">
+                        {/* Premium Spinner */}
+                        {/* <div className="w-24 h-24 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin"></div>
+                        <div className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-cyan-400">GPT</div> */}
+                    </div>
+                    <div className="mt-8 text-center px-6">
+                        <h3 className="text-xl font-black uppercase tracking-widest mb-2">Preparing Your <span className="text-pink-500">Match</span></h3>
+                        <p className="text-white/40 text-xs font-bold uppercase tracking-[0.2em]">Connecting to Google Ad Server...</p>
                     </div>
 
-                    <div className="absolute top-4 right-4 z-20 bg-yellow-500 text-black px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all">
-                        Reward Granting in {adTimer}s...
+                    {/* Subtle micro-animations */}
+                    <div className="absolute bottom-12 flex gap-1">
+                        {[1, 2, 3].map(i => (
+                            <div key={i} className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.2}s` }}></div>
+                        ))}
                     </div>
                 </div>
             )}
@@ -515,8 +542,30 @@ const VideoChat = () => {
                         {remoteStream && !partnerVideoOff ? (
                             <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
                         ) : (
-                            <div className="text-gray-500 font-bold uppercase tracking-widest text-sm">
-                                {status === 'waiting' ? 'Looking for partner...' : 'Waiting for connection...'}
+                            <div className="text-gray-500 font-bold uppercase tracking-widest text-sm text-center px-4">
+                                {partnerVideoOff ? (
+                                    <div className="flex flex-col items-center gap-2">
+                                        {/* <span className="text-red-500/80 text-xl opacity-50">📷</span> */}
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="w-14 h-14 text-red-500/80 opacity-60"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            strokeWidth="1.8"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                d="M3 3l18 18M9.75 9.75a3 3 0 104.5 4.5M7 7h2l2-3h2l2 3h2a2 2 0 012 2v7a2 2 0 01-2 2H7a2 2 0 01-2-2V9a2 2 0 012-2z"
+                                            />
+                                        </svg>
+
+                                        <span className="text-red-400">Stranger Camera Off</span>
+                                    </div>
+                                ) : (
+                                    status === 'waiting' ? 'Looking for partner...' : 'Waiting for connection...'
+                                )}
                             </div>
                         )}
                         {isRemoteUnsafe && (
@@ -556,13 +605,28 @@ const VideoChat = () => {
                             className="w-full h-full object-cover scale-x-[-1]"
                         />
                         {(isVideoOff || isLocalUnsafe) && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950/80 z-20 backdrop-blur-sm">
-                                <div className="text-4xl mb-2 opacity-30 text-white font-bold uppercase tracking-widest">You</div>
-                                <div className="px-4 py-1.5 bg-red-600/20 border border-red-500/50 rounded-full">
-                                    <p className="text-[10px] text-red-400 font-bold uppercase tracking-widest text-center">
-                                        {isLocalUnsafe ? 'Safety Filter Active' : 'Camera Off'}
-                                    </p>
-                                </div>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950 z-20 backdrop-blur-md">
+                                <div className="text-sm mb-4 opacity-20 text-white font-black uppercase tracking-[0.5em]">You</div>
+                                {/* <div className="px-6 py-3 bg-red-600/10 border border-red-500/30 rounded-2xl flex flex-col items-center gap-2"> */}
+                                {/* <span className="text-red-500 text-2xl">📷</span> */}
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="w-14 h-17 text-red-500/80 opacity-60"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M3 3l18 18M9.75 9.75a3 3 0 104.5 4.5M7 7h2l2-3h2l2 3h2a2 2 0 012 2v7a2 2 0 01-2 2H7a2 2 0 01-2-2V9a2 2 0 012-2z"
+                                    />
+                                </svg>
+                                <p className="text-xs text-red-400 font-black uppercase tracking-widest text-center">
+                                    {isLocalUnsafe ? 'Safety Filter Active' : 'Your Camera is Off'}
+                                </p>
+                                {/* </div> */}
                             </div>
                         )}
 
@@ -612,7 +676,7 @@ const VideoChat = () => {
                             </div>
 
                             {/* Mobile STOP/NEXT Buttons - Absolute bottom and compact */}
-                            <div className="flex px-0 pb-2 pt-0.5 gap-2 bg-transparent">
+                            <div className="flex px-0 pb-2 pt-0.5 gap-2 bg-transparent px-3.5">
                                 <button
                                     onClick={handleEndCall}
                                     className="flex-1 py-2.5 bg-slate-900/90 text-white font-bold text-[9px] rounded-lg shadow-lg uppercase tracking-widest transition-all border border-white/5 active:scale-95"
@@ -647,6 +711,15 @@ const VideoChat = () => {
                     {/* <BannerAd /> */}
                 </div>
             </div>
+            {/* Mandatory Safety Policy Popup */}
+            <SafetyPolicy isOpen={showPolicy} onAccept={() => setShowPolicy(false)} />
+
+            <InterstitialAd
+                isOpen={showStopAd}
+                onClose={handleStopAdComplete}
+                clickCount={stopClickCount}
+            />
+
         </div>
     );
 };
