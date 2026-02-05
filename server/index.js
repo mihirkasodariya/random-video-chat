@@ -135,8 +135,8 @@ io.on('connection', (socket) => {
 });
 
 // Handle React routing - CATCH ALL
-// Express 5 requires (.*) for catch-all instead of *
-app.get('(.*)', (req, res) => {
+// Using middleware instead of app.get to avoid Express 5 path-to-regexp errors
+app.use((req, res) => {
     res.sendFile(path.join(__dirname, '../client/dist/index.html'));
 });
 
