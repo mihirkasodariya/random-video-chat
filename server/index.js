@@ -135,8 +135,8 @@ io.on('connection', (socket) => {
 });
 
 // Handle React routing - CATCH ALL
-// This must be AFTER all other routes (like socket.io and static files)
-app.get('*', (req, res) => {
+// Express 5 requires (.*) for catch-all instead of *
+app.get('(.*)', (req, res) => {
     res.sendFile(path.join(__dirname, '../client/dist/index.html'));
 });
 
