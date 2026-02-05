@@ -134,16 +134,10 @@ io.on('connection', (socket) => {
     });
 });
 
-// Handle React routing, return all requests to React app
-app.get(['/', '/index.html'], (req, res) => {
+// Handle React routing - CATCH ALL
+// This must be AFTER all other routes (like socket.io and static files)
+app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../client/dist/index.html'));
-});
-
-// SPA Fallback
-app.use((req, res) => {
-    if (req.accepts('html')) {
-        res.sendFile(path.join(__dirname, '../client/dist/index.html'));
-    }
 });
 
 const PORT = process.env.PORT || 5000;
