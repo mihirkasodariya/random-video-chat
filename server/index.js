@@ -1,5 +1,4 @@
 const express = require('express');
-const https = require('https');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
@@ -11,16 +10,28 @@ app.use(cors());
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
-// Read SSL certificate and key
-const options = {
-    key: fs.readFileSync(path.join(__dirname, 'key.pem')),
-    cert: fs.readFileSync(path.join(__dirname, 'cert.pem'))
-};
+const isProduction = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+let server;
 
-const server = https.createServer(options, app);
+if (isProduction) {
+    // In production (Render/Vercel), let the platform handle SSL
+    const http = require('http');
+    server = http.createServer(app);
+    console.log("Running in Production Mode (HTTP)");
+} else {
+    // In local development, use the self-signed certificates for HTTPS
+    const https = require('https');
+    const options = {
+        key: fs.readFileSync(path.join(__dirname, 'key.pem')),
+        cert: fs.readFileSync(path.join(__dirname, 'cert.pem'))
+    };
+    server = https.createServer(options, app);
+    console.log("Running in Local Mode (HTTPS)");
+}
+
 const io = new Server(server, {
     cors: {
-        origin: "*", // Allow all origins for dev, restrict in prod
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
@@ -137,7 +148,8 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`\x1b[32m%s\x1b[0m`, `Backend (HTTPS) for Signal Server running on:`);
-    console.log(`  > Local:    https://localhost:${PORT}`);
-    console.log(`\x1b[33m%s\x1b[0m`, `Note: Since this uses a self-signed cert, you may need to visit the link above once and 'Proceed to localhost (unsafe)' in your browser.`);
+    console.log(`Backend running on port: ${PORT}`);
+    if (!isProduction) {
+        console.log(`Local HTTPS: https://localhost:${PORT}`);
+    }
 });

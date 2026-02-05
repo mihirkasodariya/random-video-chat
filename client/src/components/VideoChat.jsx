@@ -75,7 +75,11 @@ const VideoChat = () => {
         });
 
         const backendUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
-        const newSocket = io(backendUrl);
+        const newSocket = io(backendUrl, {
+            transports: ['websocket', 'polling'],
+            secure: true,
+            reconnectionAttempts: 5
+        });
         setSocket(newSocket);
         socketRef.current = newSocket;
 

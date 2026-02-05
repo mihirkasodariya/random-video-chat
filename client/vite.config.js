@@ -8,9 +8,10 @@ export default defineConfig({
   server: {
     proxy: {
       '/socket.io': {
-        target: 'https://localhost:5000',
+        target: 'https://random-video-chat-node.onrender.com',
         ws: true,
-        secure: false
+        secure: true,
+        changeOrigin: true
       }
     }
   }
