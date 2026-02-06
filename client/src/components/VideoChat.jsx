@@ -64,6 +64,13 @@ const VideoChat = () => {
     const [showChat, setShowChat] = useState(false); // New state for mobile toggle
     const [showPolicy, setShowPolicy] = useState(true); // Mandatory per-entry popup
 
+    const streamRef = useRef(null);
+
+    // Sync stream to ref for cleanup
+    useEffect(() => {
+        streamRef.current = stream;
+    }, [stream]);
+
     useEffect(() => {
         if (showPolicy) return; // Wait for agreement before starting
 
@@ -84,7 +91,7 @@ const VideoChat = () => {
         socketRef.current = newSocket;
 
         return () => {
-            if (stream) stream.getTracks().forEach(track => track.stop());
+            if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
             newSocket.disconnect();
         };
     }, [showPolicy]);
@@ -132,7 +139,7 @@ const VideoChat = () => {
         }
     };
 
-    
+
     useEffect(() => {
         if (localVideoRef.current && stream) {
             localVideoRef.current.srcObject = stream;
