@@ -96,6 +96,18 @@ const VideoChat = () => {
         };
     }, [showPolicy]);
 
+    // Handle Mobile Back Button / popstate
+    useEffect(() => {
+        // Push state to trap the back button if needed, but simple popstate listener is safer
+        const handlePopState = (event) => {
+            // Prevent default browser weirdness and force app navigation
+            navigate('/', { replace: true });
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [navigate]);
+
     const setupCamera = async (mode = 'user') => {
         try {
             if (stream) {
