@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 
 const Layout = ({ children }) => {
     return (
-        <div className="min-h-screen w-full bg-slate-900 text-white font-sans overflow-x-hidden flex flex-col">
+        <div className="min-h-screen w-full bg-slate-900 text-white font-sans overflow-x-hidden flex flex-col pb-6 md:pb-0">
             {/* Header */}
             <header className="w-full px-6 py-2 flex items-center justify-center md:justify-between border-b border-white/5 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50 shrink-0">
                 <div className="flex items-center gap-3">
