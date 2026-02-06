@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import VideoChat from './components/VideoChat';
 import Home from './components/Home';
 import AgeVerification from './components/AgeVerification';
@@ -9,7 +9,7 @@ import './index.css';
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/age-verification" element={<AgeVerification />} />
@@ -22,7 +22,7 @@ function App() {
           </div>
         } />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
 
