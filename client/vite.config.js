@@ -14,5 +14,17 @@ export default defineConfig({
         changeOrigin: true
       }
     }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-tf': ['@tensorflow/tfjs', 'nsfwjs'],
+          'vendor-socket': ['socket.io-client']
+        }
+      }
+    },
+    chunkSizeWarningLimit: 1000
   }
 })
