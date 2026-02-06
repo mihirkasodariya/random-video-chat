@@ -132,11 +132,13 @@ const VideoChat = () => {
         }
     };
 
+    
     useEffect(() => {
         if (localVideoRef.current && stream) {
-            if (localVideoRef.current.srcObject !== stream) {
-                localVideoRef.current.srcObject = stream;
-            }
+            localVideoRef.current.srcObject = stream;
+            localVideoRef.current.onloadedmetadata = () => {
+                localVideoRef.current.play().catch(e => console.error("Local video play error", e));
+            };
         }
     }, [stream, isVideoOff, isLocalUnsafe]);
 
@@ -144,6 +146,9 @@ const VideoChat = () => {
         if (remoteVideoRef.current && remoteStream && !partnerVideoOff) {
             console.log("Attaching remote stream to video element");
             remoteVideoRef.current.srcObject = remoteStream;
+            remoteVideoRef.current.onloadedmetadata = () => {
+                remoteVideoRef.current.play().catch(e => console.error("Remote video play error", e));
+            };
         }
     }, [remoteStream, partnerVideoOff]);
 
@@ -602,6 +607,20 @@ const VideoChat = () => {
 
                     {/* Local Video (You) */}
                     <div className="flex-1 h-1/2 md:h-full relative overflow-hidden flex items-center justify-center bg-gray-900">
+                        {error && (
+                            <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900 p-6 text-center">
+                                <div className="space-y-4">
+                                    <span className="text-4xl">🚫</span>
+                                    <p className="text-red-400 font-bold uppercase tracking-widest text-sm">{error}</p>
+                                    <button
+                                        onClick={() => window.location.reload()}
+                                        className="px-6 py-2 bg-white/10 text-white text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-white/20"
+                                    >
+                                        Reload Page
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                         <video
                             ref={localVideoRef}
                             autoPlay

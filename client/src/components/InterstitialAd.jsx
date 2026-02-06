@@ -1,4 +1,3 @@
-import React, { useEffect } from 'react';
 import GoogleAd from './GoogleAd';
 
 const InterstitialAd = ({ isOpen, onClose }) => {

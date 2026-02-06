@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 const PWAInstall = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
